@@ -1,0 +1,22 @@
+{
+  "name": "pi-tts",
+  "version": "1.0.0",
+  "description": "Pi extension that reads the last message aloud using text-to-speech",
+  "main": "index.ts",
+  "type": "module",
+  "keywords": [
+    "pi",
+    "tts",
+    "text-to-speech",
+    "voice",
+    "extension"
+  ],
+  "author": "Pi User",
+  "license": "MIT",
+  "pi": {
+    "name": "pi-tts",
+    "description": "Read the last message aloud using text-to-speech with a keybinding",
+    "version": "1.0.0",
+    "type": "extension"
+  }
+}

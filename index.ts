@@ -1,0 +1,157 @@
+/**
+ * Pi-TTS Extension
+ * Reads the last message aloud using text-to-speech
+ */
+
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+
+// A simple implementation that gets the last message content and reads it aloud
+export default function piTts(pi: ExtensionAPI): void {
+  // Function to read text aloud using the system TTS
+  async function speakText(text: string, ctx: ExtensionContext): Promise<void> {
+    if (!ctx.hasUI) {
+      console.log(`[TTS] Reading: ${text}`);
+      return;
+    }
+
+    try {
+      // Show status widget while speaking
+      const statusWidget = [ctx.ui.theme.fg("muted", "Speaking...")];
+      ctx.ui.setWidget("tts-status", statusWidget);
+
+      // Use the system TTS if available, or fallback to console log
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        // Browser environment - use Web Speech API
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        speechSynthesis.speak(utterance);
+      } else if (process.platform && process.platform === 'darwin') {
+        // macOS - use osascript to speak using system voices
+        const { execSync } = await import('node:child_process');
+        const escapedText = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        execSync(`osascript -e 'say "${escapedText}"'`);
+      } else if (process.platform && process.platform === 'linux') {
+        // Linux - try festival or espeak
+        const { execSync } = await import('node:child_process');
+        try {
+          execSync(`echo "${text}" | espeak -s 140`, { stdio: 'ignore' });
+        } catch {
+          try {
+            execSync(`echo "${text}" | festival --tts`, { stdio: 'ignore' });
+          } catch {
+            console.log(`[TTS] Could not speak text (no TTS utility available): ${text}`);
+          }
+        }
+      } else if (process.platform && process.platform === 'win32') {
+        // Windows - use PowerShell to speak via SAPI
+        const { execSync } = await import('node:child_process');
+        const escapedText = text.replace(/"/g, '""');
+        execSync(`powershell -command "Add-Type -AssemblyName System.Speech; $speak = New-Object System.Speech.Synthesis.SpeechSynthesizer; $speak.Speak('${escapedText}');"`);  
+      } else {
+        // Fallback to console output
+        console.log(`[TTS] Speaking: ${text}`);
+      }
+      
+      // Clear status widget after speaking
+      setTimeout(() => {
+        ctx.ui.setWidget("tts-status", undefined);
+      }, 1000);
+    } catch (error) {
+      console.error('[TTS] Error speaking text:', error);
+      ctx.ui.setWidget("tts-status", [ctx.ui.theme.fg("error", "Error speaking")]);
+      setTimeout(() => {
+        ctx.ui.setWidget("tts-status", undefined);
+      }, 2000);
+    }
+  }
+
+  // Function to get the last message and read it aloud
+  async function readLastMessage(ctx: ExtensionContext): Promise<void> {
+    try {
+      // Get recent conversation history using session manager
+      const entries = ctx.sessionManager.getEntries();
+      
+      if (entries && entries.length > 0) {
+        // Find the most recent assistant message (since that's what we usually want to read)
+        let lastAssistantMessage = null;
+        
+        // Iterate backwards to find the most recent assistant message
+        for (let i = entries.length - 1; i >= 0; i--) {
+          const entry = entries[i];
+          if (entry.type === "message" && entry.message.role === 'assistant') {
+            lastAssistantMessage = entry;
+            break;
+          }
+        }
+        
+        if (lastAssistantMessage && lastAssistantMessage.message.content) {
+          let contentText = '';
+          
+          if (typeof lastAssistantMessage.message.content === 'string') {
+            contentText = lastAssistantMessage.message.content;
+          } else if (Array.isArray(lastAssistantMessage.message.content)) {
+            // Handle structured content (could be multiple parts, text and images etc.)
+            contentText = lastAssistantMessage.message.content
+              .filter(part => part.type === 'text')
+              .map(part => part.text)
+              .join(' ');
+          }
+          
+          if (contentText) {
+            // Speak the content
+            await speakText(contentText, ctx);
+          } else {
+            console.log('[TTS] No text content found in last message');
+            ctx.ui.setWidget("tts-status", [ctx.ui.theme.fg("muted", "No text to read")]);
+            setTimeout(() => {
+              ctx.ui.setWidget("tts-status", undefined);
+            }, 2000);
+          }
+        } else {
+          console.log("[TTS] No assistant messages found in conversation history");
+          ctx.ui.setWidget("tts-status", [ctx.ui.theme.fg("muted", "No message to read")]);
+          setTimeout(() => {
+            ctx.ui.setWidget("tts-status", undefined);
+          }, 2000);
+        }
+      } else {
+        console.log('[TTS] No conversation history available');
+        ctx.ui.setWidget("tts-status", [ctx.ui.theme.fg("muted", "No history")]);
+        setTimeout(() => {
+          ctx.ui.setWidget("tts-status", undefined);
+        }, 2000);
+      }
+    } catch (error) {
+      console.error('[TTS] Error getting last message:', error);
+      ctx.ui.setWidget("tts-status", [ctx.ui.theme.fg("error", "Error reading message")]);
+      setTimeout(() => {
+        ctx.ui.setWidget("tts-status", undefined);
+      }, 2000);
+    }
+  }
+
+  // Register the command
+  pi.registerCommand("tts-read-last", {
+    description: "Read the last assistant message aloud using text-to-speech",
+    handler: (_args, ctx) => readLastMessage(ctx),
+  });
+
+  // Register a keybinding (using Ctrl+Shift+T as default)
+  pi.registerShortcut(
+    {
+      key: 't',
+      modifiers: ['control', 'shift'],
+    },
+    {
+      description: "Read last assistant message aloud",
+      handler: (_event, ctx) => readLastMessage(ctx),
+    },
+  );
+
+  // Also add a command that can be run manually
+  pi.registerCommand("tts", {
+    description: "Read the last assistant message aloud using text-to-speech",
+    handler: (_args, ctx) => readLastMessage(ctx),
+  });
+}
