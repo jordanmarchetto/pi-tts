@@ -15,7 +15,7 @@ export default function piTts(pi: ExtensionAPI): void {
     }
 
     try {
-      // Show status widget while speaking
+      // Show status widget while speaking - set immediately
       const statusWidget = [ctx.ui.theme.fg("muted", "Speaking...")];
       ctx.ui.setWidget("tts-status", statusWidget);
 
@@ -53,7 +53,7 @@ export default function piTts(pi: ExtensionAPI): void {
         console.log(`[TTS] Speaking: ${text}`);
       }
       
-      // Clear status widget after speaking
+      // Clear status widget after a delay (but we show it immediately above)
       setTimeout(() => {
         ctx.ui.setWidget("tts-status", undefined);
       }, 1000);
@@ -79,7 +79,8 @@ export default function piTts(pi: ExtensionAPI): void {
         // Iterate backwards to find the most recent assistant message
         for (let i = entries.length - 1; i >= 0; i--) {
           const entry = entries[i];
-          if (entry.type === "message" && entry.message.role === 'assistant') {
+          // Added safety check: ensure entry is properly formed
+          if (entry && entry.type === "message" && entry.message && entry.message.role === 'assistant') {
             lastAssistantMessage = entry;
             break;
           }
@@ -93,7 +94,7 @@ export default function piTts(pi: ExtensionAPI): void {
           } else if (Array.isArray(lastAssistantMessage.message.content)) {
             // Handle structured content (could be multiple parts, text and images etc.)
             contentText = lastAssistantMessage.message.content
-              .filter(part => part.type === 'text')
+              .filter(part => part && part.type === 'text' && part.text)
               .map(part => part.text)
               .join(' ');
           }
@@ -136,18 +137,6 @@ export default function piTts(pi: ExtensionAPI): void {
     description: "Read the last assistant message aloud using text-to-speech",
     handler: (_args, ctx) => readLastMessage(ctx),
   });
-
-  // Register a keybinding (using Ctrl+Shift+T as default)
-  pi.registerShortcut(
-    {
-      key: 't',
-      modifiers: ['control', 'shift'],
-    },
-    {
-      description: "Read last assistant message aloud",
-      handler: (_event, ctx) => readLastMessage(ctx),
-    },
-  );
 
   // Also add a command that can be run manually
   pi.registerCommand("tts", {
