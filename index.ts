@@ -3,8 +3,32 @@
  * Reads the last message aloud using text-to-speech
  */
 
+import { readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Key } from "@earendil-works/pi-tui";
+import { Key, parseKey, truncateToWidth } from "@earendil-works/pi-tui";
+
+const DEFAULT_SHORTCUT = "ctrl+shift+h";
+const SETTINGS_PATH = join(homedir(), ".pi", "agent", "pi-tts.json");
+
+// Stored as { version: 1, shortcut: "ctrl+shift+h" }. Read synchronously so the
+// shortcut is live from the first keystroke of the session.
+function readShortcut(): string {
+  try {
+    const parsed = JSON.parse(readFileSync(SETTINGS_PATH, "utf8")) as Record<string, unknown>;
+    if (parsed && parsed.version === 1 && typeof parsed.shortcut === "string") {
+      return parsed.shortcut;
+    }
+  } catch {
+    // Missing or invalid file falls through to the default.
+  }
+  return DEFAULT_SHORTCUT;
+}
+
+function saveShortcut(shortcut: string): void {
+  writeFileSync(SETTINGS_PATH, JSON.stringify({ version: 1, shortcut }, null, 2) + "\n");
+}
 
 // A simple implementation that gets the last message content and reads it aloud
 export default function piTts(pi: ExtensionAPI): void {
@@ -133,20 +157,56 @@ export default function piTts(pi: ExtensionAPI): void {
     }
   }
 
+  // Extension shortcuts are literal keys, not keybindings.json ids, so we store
+  // our own setting and register it at startup. Changes apply after /reload.
+  pi.registerShortcut(readShortcut() as Parameters<ExtensionAPI["registerShortcut"]>[0], {
+    description: "Read last assistant message aloud",
+    handler: (ctx) => readLastMessage(ctx),
+  });
+
+  pi.registerCommand("tts-key", {
+    description: "Record a new keyboard shortcut for reading the last message",
+    handler: async (_args, ctx) => {
+      const pressed = await ctx.ui.custom<string | undefined>(
+        (_tui, theme, keybindings, done) => ({
+          render(width: number): string[] {
+            return [
+              truncateToWidth(
+                theme.fg("accent", theme.bold("Press a key for TTS (Esc to cancel)")),
+                width,
+              ),
+            ];
+          },
+          handleInput(data: string): void {
+            if (keybindings.matches(data, "tui.select.cancel")) {
+              done(undefined);
+              return;
+            }
+            const parsed = parseKey(data);
+            if (parsed) done(parsed);
+          },
+          invalidate() {},
+        }),
+      );
+
+      if (!pressed) return;
+      // Bare printable keys would shadow normal typing; require a modifier or F-key.
+      const needsModifier = !/^(f(?:[1-9]|1[0-2]))$/.test(pressed);
+      const hasModifier = pressed.includes("+");
+      if (needsModifier && !hasModifier) {
+        ctx.ui.notify(`Refusing bare key "${pressed}" — include a modifier like ctrl or alt`, "error");
+        return;
+      }
+      saveShortcut(pressed);
+      ctx.ui.notify(`Saved ${pressed}. Run /reload or restart pi to apply.`, "info");
+    },
+  });
+
   // Register the command
   pi.registerCommand("tts-read-last", {
     description: "Read the last assistant message aloud using text-to-speech",
     handler: (_args, ctx) => readLastMessage(ctx),
   });
-
-  // Register a keybinding (using Ctrl+Shift+T as default)
-  pi.registerShortcut(
-    Key.ctrlShift("t"),
-    {
-      description: "Read last assistant message aloud",
-      handler: (_event, ctx) => readLastMessage(ctx),
-    },
-  );
 
   // Also add a command that can be run manually
   pi.registerCommand("tts", {
