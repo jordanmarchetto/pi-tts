@@ -4,6 +4,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Key } from "@earendil-works/pi-tui";
 
 // A simple implementation that gets the last message content and reads it aloud
 export default function piTts(pi: ExtensionAPI): void {
@@ -137,6 +138,15 @@ export default function piTts(pi: ExtensionAPI): void {
     description: "Read the last assistant message aloud using text-to-speech",
     handler: (_args, ctx) => readLastMessage(ctx),
   });
+
+  // Register a keybinding (using Ctrl+Shift+T as default)
+  pi.registerShortcut(
+    Key.ctrlShift("t"),
+    {
+      description: "Read last assistant message aloud",
+      handler: (_event, ctx) => readLastMessage(ctx),
+    },
+  );
 
   // Also add a command that can be run manually
   pi.registerCommand("tts", {
